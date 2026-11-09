@@ -1,0 +1,60 @@
+name: 問題バンクの生成
+
+# 自動実行（schedule）は、最初の少数生成で質を確認してから有効にする。
+# 確認できたら、下の3行のコメント（先頭の # ）を外す。
+on:
+  # schedule:
+  #   - cron: '17 19 * * *'   # 毎日 日本時間 4:17（Googleの1日枠が戻った後）
+  #   - cron: '17 1 * * *'    # 日本時間 10:17（途中で止まった分を続ける）
+  #   - cron: '17 7 * * *'    # 日本時間 16:17
+  workflow_dispatch:
+    inputs:
+      models:
+        description: '使うモデル（カンマ区切り。空ならアプリの既定）'
+        required: false
+        default: ''
+      domain:
+        description: '分野ID（fundamentals / predictive / agile / ba）。空なら問題数が少ない分野から順に'
+        required: false
+        default: ''
+      target:
+        description: '目標問数（1分野あたり）'
+        required: false
+        default: '50'
+      batch:
+        description: '1回の生成で作る問題数（5〜40。多いほど、同じ呼び出し回数で問題が増える）'
+        required: false
+        default: '10'
+
+permissions:
+  contents: write
+
+jobs:
+  generate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: npm install --no-save jsdom@24
+      - name: 問題を生成（分野指定があればその分野だけ。なければ少ない順に、目標まで追加）
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GEMINI_MODELS: ${{ inputs.models }}
+          DOMAIN: ${{ inputs.domain }}
+          TARGET: ${{ inputs.target || 50 }}
+          BATCH: ${{ inputs.batch || 10 }}
+        run: |
+          if [ -n "$DOMAIN" ]; then
+            node tools/generate-bank.mjs "$DOMAIN" "$TARGET"
+          else
+            node tools/generate-bank.mjs auto "$TARGET"
+          fi
+      - name: 変更をコミット
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add bank
+          git diff --cached --quiet || (git commit -m "問題バンクを更新" && git pull --rebase origin main && git push)
